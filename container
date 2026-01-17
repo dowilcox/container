@@ -80,19 +80,21 @@ uses_host_network() {
     [ "$result" = "true" ]
 }
 
+# Get the selector for a deployment
+get_selector() {
+    local label
+    label=$(kubectl get deployment "$DEPLOYMENT" -n "$NAMESPACE" -o jsonpath='{.spec.selector.matchLabels.app}' 2>/dev/null)
+    if [ -n "$label" ]; then
+        echo "app=$label"
+    else
+        echo "app=$DEPLOYMENT"
+    fi
+}
+
 # Get the pod name for a deployment using its actual selector
 get_pod() {
     local selector
-    # Get selector in label query format directly from kubectl
-    selector=$(kubectl get deployment "$DEPLOYMENT" -n "$NAMESPACE" -o jsonpath='{.spec.selector.matchLabels.app}' 2>/dev/null)
-
-    if [ -n "$selector" ]; then
-        selector="app=$selector"
-    else
-        # Fallback to deployment name
-        selector="app=$DEPLOYMENT"
-    fi
-
+    selector=$(get_selector)
     kubectl get pods -n "$NAMESPACE" -l "$selector" --no-headers 2>/dev/null | grep -v 'Terminating' | head -1 | awk '{print $1}'
 }
 
@@ -106,7 +108,7 @@ Usage: $SCRIPT_NAME <command> [arguments]
 Commands:
   list                      List all deployments
   status <name>             Show status and health of a container
-  logs <name> [-f]          View container logs (-f to follow)
+  logs <name> [-f] [-p]     View container logs (-f follow, -p previous)
   shell <name>              Open a shell in the container
   describe <name>           Show detailed container information
   events <name>             Show recent events for the container
@@ -156,7 +158,7 @@ cmd_status() {
 
     # Pod status
     echo "Pod Status:"
-    kubectl get pods -n "$NAMESPACE" -l app="$DEPLOYMENT" -o wide 2>/dev/null || \
+    kubectl get pods -n "$NAMESPACE" -l "$(get_selector)" -o wide 2>/dev/null || \
         kubectl get pods -n "$NAMESPACE" | grep -i "$DEPLOYMENT" || \
         echo "  No pods found"
     echo ""
@@ -167,15 +169,26 @@ cmd_status() {
 }
 
 cmd_logs() {
-    local name="$1"
-    shift
-    local follow=""
+    local name=""
+    local flags=()
 
-    # Check for -f flag
+    # Parse arguments - name is first non-flag argument
     while [ $# -gt 0 ]; do
         case "$1" in
             -f|--follow)
-                follow="-f"
+                flags+=("-f")
+                ;;
+            -p|--previous)
+                flags+=("--previous")
+                ;;
+            -*)
+                print_error "Unknown flag: $1"
+                exit 1
+                ;;
+            *)
+                if [ -z "$name" ]; then
+                    name="$1"
+                fi
                 ;;
         esac
         shift
@@ -193,11 +206,7 @@ cmd_logs() {
     fi
 
     print_info "Showing logs for pod $pod..."
-    if [ -n "$follow" ]; then
-        kubectl logs "$pod" -n "$NAMESPACE" -f
-    else
-        kubectl logs "$pod" -n "$NAMESPACE"
-    fi
+    kubectl logs "$pod" -n "$NAMESPACE" "${flags[@]}"
 }
 
 cmd_shell() {
@@ -281,8 +290,10 @@ cmd_restart() {
     # Use scale down/up instead
     if uses_host_network; then
         print_warning "hostNetwork detected, using scale down/up restart"
+        local selector
+        selector=$(get_selector)
         kubectl scale deployment/"$DEPLOYMENT" -n "$NAMESPACE" --replicas=0
-        kubectl wait --for=delete pod -l app="$DEPLOYMENT" -n "$NAMESPACE" --timeout=60s 2>/dev/null || true
+        kubectl wait --for=delete pod -l "$selector" -n "$NAMESPACE" --timeout=60s 2>/dev/null || true
         kubectl scale deployment/"$DEPLOYMENT" -n "$NAMESPACE" --replicas=1
     else
         kubectl rollout restart deployment/"$DEPLOYMENT" -n "$NAMESPACE"
@@ -386,8 +397,10 @@ cmd_update() {
     # hostNetwork deployments can't do rolling restarts (port conflicts)
     if uses_host_network; then
         print_warning "hostNetwork detected, using scale down/up restart"
+        local selector
+        selector=$(get_selector)
         kubectl scale deployment/"$DEPLOYMENT" -n "$NAMESPACE" --replicas=0
-        kubectl wait --for=delete pod -l app="$DEPLOYMENT" -n "$NAMESPACE" --timeout=60s 2>/dev/null || true
+        kubectl wait --for=delete pod -l "$selector" -n "$NAMESPACE" --timeout=60s 2>/dev/null || true
         kubectl scale deployment/"$DEPLOYMENT" -n "$NAMESPACE" --replicas=1
     else
         kubectl rollout restart deployment/"$DEPLOYMENT" -n "$NAMESPACE"

@@ -79,6 +79,7 @@ container update myapp
 - Color output (disabled when piping)
 - Auto-rebuild for local images on update
 - Filters out system deployments (kube-system, local-path, svclb)
+- Handles hostNetwork deployments correctly (uses scale down/up instead of rolling restart)
 
 ## Build Command
 

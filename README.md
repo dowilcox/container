@@ -32,7 +32,7 @@ container <command> [arguments]
 |---------|---------|-------------|
 | `list` | `ls` | List all deployments |
 | `status <name>` | `st` | Show status and health of a container |
-| `logs <name> [-f]` | `log` | View container logs (-f to follow) |
+| `logs <name> [-f] [-p]` | `log` | View container logs (-f follow, -p previous) |
 | `shell <name>` | `sh`, `exec` | Open a shell in the container |
 | `describe <name>` | `desc` | Show detailed container information |
 | `events <name>` | `ev` | Show recent events for the container |
